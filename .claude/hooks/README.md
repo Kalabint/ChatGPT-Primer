@@ -1,31 +1,24 @@
-# no-superlative-guard
+# Hooks
 
-A Claude Code hook that enforces several of the behavioral skills in this repo
-(`no-sycophancy`, `no-invented-hazards`, `no-unmeasured-numbers`, and the
-empty-deferral rule) mechanically, instead of relying on the model to remember
-them. The skills are the "what"; this hook is the "so it actually happens".
+Claude Code hooks that make some of the skills in this repo enforce or fire
+automatically instead of relying on the model to remember them. All hooks fail
+open (any error exits 0) and require `jq` and `bash`.
 
-## What it does
+Copy the scripts to `~/.claude/hooks/` and merge the JSON blocks below into
+`~/.claude/settings.json`.
 
-- **Stop**: scans the assistant's finished message. On a banned phrase it blocks
-  the turn and injects a terse correction instruction, so the model silently
-  re-emits the same content without the phrase.
-- **PostToolUse (Write|Edit)**: scans file content before it is written, so the
-  banned phrasing never lands in a file either. It exempts `~/.claude/**`, since
-  the pattern files quote the banned phrases verbatim by design.
+## 1. no-superlative-guard
 
-Patterns live in `banned-patterns.sh` (six classes, documented inline). Tune the
-regexes to your own tics. The guard fails **open**: any error exits 0, because a
-hook that blocks the session is worse than a missed match.
+Enforces `no-sycophancy`, `no-invented-hazards`, `no-unmeasured-numbers`, and the
+empty-deferral rule.
 
-## Requirements
+- **Stop**: scans the finished message; on a banned phrase it blocks the turn and
+  forces a silent re-emit without it.
+- **PostToolUse (Write|Edit)**: scans file content before it is written; exempts
+  `~/.claude/**` since the pattern files quote the banned phrases by design.
 
-- `jq` on PATH (the hook exits 0 if it is missing).
-- `bash`.
-
-## Install
-
-Copy both scripts to `~/.claude/hooks/` and add this to `~/.claude/settings.json`:
+Patterns live in `banned-patterns.sh` (six classes, documented inline) - tune the
+regexes to your own habits.
 
 ```json
 {
@@ -40,4 +33,36 @@ Copy both scripts to `~/.claude/hooks/` and add this to `~/.claude/settings.json
 }
 ```
 
-`banned-patterns.sh` is sourced by the guard; it does not need its own hook entry.
+## 2. handoff
+
+Pairs with the `handoff` skill (`.claude/skills/handoff/`), which reads or writes
+a session-handoff doc so a fresh session can continue the work. The three hooks
+make it automatic, and only engage for sessions where the skill was actually used
+(a per-session marker under `~/.claude/handoff-active/`):
+
+- **handoff-mark.sh** - PreToolUse(Skill): when the handoff skill is invoked, marks
+  the session active, so the other two hooks stay quiet in unrelated sessions.
+- **handoff-load.sh** - SessionStart: injects the curated handoff doc (or the
+  pre-compact safety net) as context so a resumed session starts current.
+- **handoff-precompact.sh** - PreCompact: before compaction, captures firsthand
+  recent state (git status, last commits, last user messages verbatim) as a
+  safety net. Deliberately not a model summary, so nothing lossy is institutionalized.
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "bash ~/.claude/hooks/handoff-load.sh" } ] }
+    ],
+    "PreCompact": [
+      { "hooks": [ { "type": "command", "command": "bash ~/.claude/hooks/handoff-precompact.sh" } ] }
+    ],
+    "PreToolUse": [
+      { "matcher": "Skill", "hooks": [ { "type": "command", "command": "bash ~/.claude/hooks/handoff-mark.sh" } ] }
+    ]
+  }
+}
+```
+
+If you already have entries for these events, merge the arrays rather than
+replacing them.
